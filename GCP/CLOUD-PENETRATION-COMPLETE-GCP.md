@@ -370,6 +370,54 @@ gcloud logging sinks create audit-sink \
 
 ---
 
+
+## 4.5 LATERAL MOVEMENT
+
+## 5.4 GCP CROSS-PROJECT LATERAL MOVEMENT
+
+### 📋 EXPLORAÇÃO
+
+```bash
+#!/bin/bash
+# Script: gcp-cross-project.sh
+
+echo "[*] Enumerando projetos acessíveis"
+
+# Listar projetos (requererá permissão)
+PROJECTS=$(gcloud projects list --query '[*].[projectId, name]' --format='table')
+
+echo "[+] Projetos acessíveis:"
+echo "$PROJECTS"
+
+# Para cada projeto, explorar
+for project in $(gcloud projects list --query '[*].projectId' --output text); do
+  echo "[*] Explorando projeto: $project"
+  
+  # Mudar projeto
+  gcloud config set project $project
+  
+  # Listar service accounts
+  SAs=$(gcloud iam service-accounts list --query '[*].email' --output text)
+  echo "[+] Service Accounts:"
+  echo "$SAs" | head -3
+  
+  # Listar buckets do projeto
+  BUCKETS=$(gsutil ls -p $project 2>/dev/null)
+  if [ ! -z "$BUCKETS" ]; then
+    echo "[+] Cloud Storage buckets:"
+    echo "$BUCKETS" | head -3
+  fi
+  
+  # Listar VMs
+  VMs=$(gcloud compute instances list --project=$project --format='value(name)' 2>/dev/null)
+  if [ ! -z "$VMs" ]; then
+    echo "[+] Compute instances:"
+    echo "$VMs" | head -3
+  fi
+done
+```
+
+
 ## 🛠️ TOOLS NECESSÁRIAS
 
 ```bash

